@@ -276,12 +276,13 @@
 
       <div class="summary-box">
         <p style="font-weight:700;font-size:14.5px;margin-bottom:6px;color:var(--teal-deep)">📋 Tu resumen para papá</p>
-        <p style="font-size:13px;color:var(--ink-soft);margin-bottom:10px">Toca el botón, se copia todo, y pégalo en el chat con tu papá.</p>
+        <p style="font-size:13px;color:var(--ink-soft);margin-bottom:10px">Toca el botón y se abrirá WhatsApp con tu resumen ya escrito para tu papá. Solo dale a "enviar".</p>
         <textarea id="summary" readonly></textarea>
         <div class="nav" style="margin-top:12px">
           <button class="btn btn-ghost" onclick="prev()">←</button>
-          <button class="btn btn-amber" onclick="copySummary()">📋 Copiar y enviar a papá</button>
+          <button class="btn btn-amber" onclick="sendToDad()">📲 Enviar a papá por WhatsApp</button>
         </div>
+        <button onclick="copySummary()" style="margin-top:10px;width:100%;background:none;border:none;color:var(--ink-soft);font-family:inherit;font-size:13px;text-decoration:underline;cursor:pointer;padding:6px">o solo copiar el texto</button>
       </div>
       <p class="footer-sig">Brújula · cuestionario de orientación vocacional</p>
     </section>
@@ -358,7 +359,7 @@ function buildInterests(){
     const sc = document.createElement('div'); sc.className='scale';
     labels.forEach((lab,v)=>{
       const b=document.createElement('button'); b.textContent=lab;
-      b.onclick=()=>{A.interests[i]=v; [...sc.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel');};
+      b.onclick=()=>{A.interests[i]=v; [...sc.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); save();};
       sc.appendChild(b);
     });
     div.appendChild(sc); c.appendChild(div);
@@ -372,7 +373,7 @@ function buildStyles(){
     const ch=document.createElement('div'); ch.className='chips';
     s.opts.forEach((o,j)=>{
       const b=document.createElement('button'); b.textContent=o[0];
-      b.onclick=()=>{A.styles[i]={dim:o[1],txt:o[0]}; [...ch.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel');};
+      b.onclick=()=>{A.styles[i]={dim:o[1],txt:o[0]}; [...ch.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); save();};
       ch.appendChild(b);
     });
     f.appendChild(ch); c.appendChild(f);
@@ -387,7 +388,7 @@ function buildScaleList(arr,store,containerId,warm){
     const sc=document.createElement('div'); sc.className='scale'+(warm?' warm':'');
     labels.forEach((lab,v)=>{
       const b=document.createElement('button'); b.textContent=lab;
-      b.onclick=()=>{store[i]=v; [...sc.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel');};
+      b.onclick=()=>{store[i]=v; [...sc.children].forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); save();};
       sc.appendChild(b);
     });
     div.appendChild(sc); c.appendChild(div);
@@ -406,9 +407,9 @@ function show(n){
   cur=n;
   const pct = (n/TOTAL)*100;
   document.getElementById('pbar').style.width = pct+'%';
-  document.getElementById('scount').textContent = Math.min(n+1,TOTAL+1>7?7:n+1) + ' / 7';
   document.getElementById('scount').textContent = (n>=7?7:n+1) + ' / 7';
   window.scrollTo({top:0,behavior:'smooth'});
+  save();
 }
 function next(){ if(cur<TOTAL) show(cur+1); }
 function prev(){ if(cur>0) show(cur-1); }
@@ -424,6 +425,19 @@ function computeRIASEC(){
 }
 
 function finish(){
+  // avisar amablemente si faltan respuestas
+  const miss = countMissing();
+  const totalMiss = miss.interests + miss.styles + miss.values + miss.skills;
+  if(totalMiss > 0){
+    const revisar = confirm(`Aún faltan ${totalMiss} respuesta(s) por contestar.\n\nAceptar = ir a revisarlas\nCancelar = ver el resultado de todos modos`);
+    if(revisar){
+      if(miss.interests) show(2);
+      else if(miss.styles) show(3);
+      else if(miss.values) show(4);
+      else if(miss.skills) show(5);
+      return;
+    }
+  }
   const score = computeRIASEC();
   const sorted = Object.entries(score).sort((a,b)=>b[1]-a[1]);
   const max = Math.max(1, ...Object.values(score));
@@ -492,11 +506,11 @@ function buildSummary(score, sorted, nm){
   txt += `\nCódigo Holland (top 3): ${sorted.slice(0,3).map(s=>s[0]).join('')}\n\n`;
 
   txt += "💡 LO QUE BUSCA EN UN TRABAJO (importancia)\n";
-  values.forEach((v,i)=>{ txt += `• ${v}: ${lvlW[A.values[i]??0]}\n`; });
+  values.forEach((v,i)=>{ txt += `• ${v}: ${A.values[i]==null?'(sin responder)':lvlW[A.values[i]]}\n`; });
   txt += "\n";
 
   txt += "💪 CÓMO SE SIENTE EN SUS HABILIDADES\n";
-  skills.forEach((s,i)=>{ txt += `• ${s}: ${lvl[A.skills[i]??0]}\n`; });
+  skills.forEach((s,i)=>{ txt += `• ${s}: ${A.skills[i]==null?'(sin responder)':lvl[A.skills[i]]}\n`; });
   txt += "\n";
 
   txt += "🎯 FORMA DE TRABAJAR (lo que eligió)\n";
@@ -514,19 +528,113 @@ function buildSummary(score, sorted, nm){
 }
 
 /* ---------- COPY ---------- */
-function copySummary(){
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2600);
+}
+function copyText(str){
+  // intenta copiar; avisa la verdad (éxito o no)
   const ta=document.getElementById('summary');
   ta.removeAttribute('readonly');
   ta.select(); ta.setSelectionRange(0,99999);
   let ok=false;
   try{ ok=document.execCommand('copy'); }catch(e){}
-  if(navigator.clipboard){ navigator.clipboard.writeText(ta.value).then(()=>{},()=>{}); ok=true; }
   ta.setAttribute('readonly','');
-  const t=document.getElementById('toast');
-  t.textContent = ok ? '✓ ¡Copiado! Ya puedes pegarlo' : 'Selecciona el texto y cópialo manualmente';
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),2600);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(str)
+      .then(()=>showToast('✓ ¡Copiado! Ya puedes pegarlo'))
+      .catch(()=>showToast(ok?'✓ ¡Copiado! Ya puedes pegarlo':'Mantén pulsado el texto y elige "Copiar"'));
+  } else {
+    showToast(ok?'✓ ¡Copiado! Ya puedes pegarlo':'Mantén pulsado el texto y elige "Copiar"');
+  }
 }
+function copySummary(){
+  copyText(document.getElementById('summary').value||'');
+}
+
+/* ---------- ENVIAR A PAPÁ (WhatsApp) ---------- */
+const PAPA_WHATSAPP = '522221408121';
+function sendToDad(){
+  const txt = document.getElementById('summary').value || '';
+  // respaldo silencioso en el portapapeles por si el texto fuera muy largo
+  try{
+    const ta=document.getElementById('summary');
+    ta.removeAttribute('readonly'); ta.select(); ta.setSelectionRange(0,99999);
+    document.execCommand('copy'); ta.setAttribute('readonly','');
+  }catch(e){}
+  if(navigator.clipboard && navigator.clipboard.writeText){ try{ navigator.clipboard.writeText(txt); }catch(e){} }
+  const url = 'https://wa.me/' + PAPA_WHATSAPP + '?text=' + encodeURIComponent(txt);
+  window.location.href = url;
+}
+
+/* ---------- RESPUESTAS FALTANTES ---------- */
+function countMissing(){
+  const m={interests:0,styles:0,values:0,skills:0};
+  interests.forEach((it,i)=>{ if(A.interests[i]===undefined) m.interests++; });
+  styles.forEach((s,i)=>{ if(!A.styles[i]) m.styles++; });
+  values.forEach((v,i)=>{ if(A.values[i]===undefined) m.values++; });
+  skills.forEach((s,i)=>{ if(A.skills[i]===undefined) m.skills++; });
+  return m;
+}
+
+/* ---------- GUARDADO AUTOMÁTICO ---------- */
+const SAVE_KEY = 'kaled_vocacional_v1';
+const TEXT_IDS = ['nombre','edad','materias','o1','o2','o3','o4','o5'];
+function collectText(){
+  const o={};
+  TEXT_IDS.forEach(id=>{ const el=document.getElementById(id); if(el) o[id]=el.value; });
+  return o;
+}
+function save(){
+  try{
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      interests:A.interests, styles:A.styles, values:A.values, skills:A.skills,
+      text:collectText(), cur:cur
+    }));
+  }catch(e){}
+}
+function reapplyScale(containerId, store){
+  const c=document.getElementById(containerId); if(!c) return;
+  c.querySelectorAll('.item').forEach((item,i)=>{
+    const v=store[i];
+    if(v===undefined||v===null) return;
+    item.querySelectorAll('.scale button').forEach((b,j)=>{
+      if(j==v) b.classList.add('sel'); else b.classList.remove('sel');
+    });
+  });
+}
+function reapplyStyles(){
+  const c=document.getElementById('style-list'); if(!c) return;
+  c.querySelectorAll('.field').forEach((f,i)=>{
+    const s=A.styles[i]; if(!s) return;
+    f.querySelectorAll('.chips button').forEach(b=>{
+      if(b.textContent===s.txt) b.classList.add('sel'); else b.classList.remove('sel');
+    });
+  });
+}
+function loadState(){
+  let s=null;
+  try{ s=JSON.parse(localStorage.getItem(SAVE_KEY)); }catch(e){ s=null; }
+  if(!s) return;
+  if(s.interests) A.interests=s.interests;
+  if(s.styles)    A.styles=s.styles;
+  if(s.values)    A.values=s.values;
+  if(s.skills)    A.skills=s.skills;
+  if(s.text){ Object.entries(s.text).forEach(([id,val])=>{ const el=document.getElementById(id); if(el && val!=null) el.value=val; }); }
+  reapplyScale('interest-list', A.interests);
+  reapplyStyles();
+  reapplyScale('values-list', A.values);
+  reapplyScale('skills-list', A.skills);
+  let step = (typeof s.cur==='number') ? s.cur : 0;
+  if(step>6) step=6;      // no saltar a la pantalla de resultado vacía
+  if(step<0) step=0;
+  if(step>0) show(step);
+}
+// guardar también al escribir en los campos de texto, y restaurar al abrir
+document.addEventListener('input', save);
+loadState();
 </script>
 </body>
 </html>
